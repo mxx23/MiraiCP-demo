@@ -1549,7 +1549,7 @@ namespace MiraiCP {
     public:
         MiraiCPNewThread() noexcept = default;
         template<typename Callable, typename... Args>
-        explicit MiraiCPNewThread(Callable &&func, Args &&...args)
+        explicit    MiraiCPNewThread(Callable &&func, Args &&...args)
             : std::thread(
                       [lambda_func = std::forward<Callable>(func)](auto &&...argss) {
                           try {
