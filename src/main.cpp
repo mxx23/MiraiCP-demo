@@ -18,6 +18,24 @@
 using namespace MiraiCP;
 using namespace std;
 
+const PluginConfig CPPPlugin::config{
+    "YuYan",  // 插件id，如果和其他插件id重复将会被拒绝加载！
+    "YuYanBot",  // 插件名称
+    "1.0",       // 插件版本
+    "DC233",     // 插件作者
+};
+
+struct FriendActivation {
+  QQID uid;      // 好友ID
+  int priority;  // 活跃权重
+  FriendActivation(QQID id) { this->uid = id, this->priority = 0; }
+  FriendActivation(QQID id, int pri) { this->uid = id, this->priority = pri; }
+  bool operator<(const FriendActivation& A) const {
+    return this->priority > A.priority;
+  }
+  ~FriendActivation() {}
+};
+
 /********************* 公共资源区  ************************/
 
 bool ifexit = false;  // 退出标记，true意味着程序即将退出
@@ -25,10 +43,38 @@ mutex exitMtx;
 const QQID bot_id = 3278555283;
 vector<QQID> friendList;  // 机器人的好友列表
 mutex friendListMutex;
+vector<FriendActivation> activation;  // 好友活跃度列表
+mutex activationMutex;
 
 /*********************************************************/
 
 namespace utils {
+
+void activationAddition(QQID uid, int pri) {
+  activationMutex.lock();
+  size_t number = activation.size();
+  size_t i;
+  for (i = 0; i < number; i++) {
+    if (activation[i].uid == uid) break;
+  }
+  if (i < number) {
+    activation[i].priority += pri;
+    while (i && activation[i].priority > activation[i - 1].priority) {
+      swap(activation[i], activation[i - 1]);
+      i--;
+    }
+  }
+  activationMutex.unlock();
+}
+
+bool checkIsFriend(QQID uid) {
+  friendListMutex.lock();
+  for (auto& u : friendList) {
+    if (u == uid) return true;
+  }
+  return false;
+  friendListMutex.unlock();
+}
 
 vector<QQID> getFriendList() {
   friendListMutex.lock();
@@ -95,13 +141,6 @@ bool deepSearchJson(const nlohmann::json _json, string key, T val) {
 
 }  // namespace utils
 
-const PluginConfig CPPPlugin::config{
-    "YuYan",  // 插件id，如果和其他插件id重复将会被拒绝加载！
-    "YuYanBot",  // 插件名称
-    "1.0",       // 插件版本
-    "DC233",     // 插件作者
-};
-
 /**
  * @brief  周期性地更新好友列表的函数，应当作为一个独立的线程运行
  * @param  period_sec 周期，单位为秒
@@ -117,12 +156,81 @@ void updateFriendListPeriodicallyThread(const unsigned int period_sec) {
       return;
     }
     MiraiCP::Bot _bot(bot_id);
-    utils::updateFriendList(_bot.getFriendList());
+    vector<QQID> tempList = _bot.getFriendList();
+    utils::updateFriendList(tempList);
+    unordered_map<QQID, bool> isFriend, addition;
+    vector<FriendActivation> tempActivation;
+    for (auto& u : tempList) isFriend[u] = true;
+    activationMutex.lock();
+    for (auto& u : activation) {
+      if (isFriend[u.uid]) {
+        tempActivation.push_back(u);
+        addition[u.uid] = true;
+      }
+    }
+    for (auto& [u, v] : isFriend) {
+      if (v && !addition[u]) tempActivation.push_back(FriendActivation(u));
+    }
+    activation = tempActivation;
+#ifdef DEBUG
+    cout << "FriendList Length is : " << activation.size() << endl;
+#endif
+    activationMutex.unlock();
 #ifdef DEBUG
     cout << "Update FriendList Thread finish a period..." << endl;
 #endif
     utils::SleepForSeconds(period_sec);
   }
+}
+
+/**
+ * @brief  周期性地更新好友活跃度
+ * @param  period_sec 周期,单位为秒
+ * @return
+ */
+void updateActivationPeriodcallyThread(const unsigned int period_sec) {
+  while (true) {
+    if (utils::checkIfExit()) {
+      cout << "Update Activation Thread is closing..." << endl;
+      return;
+    }
+#ifdef DEBUG
+    cout << "Update Activation Thread is running..." << endl;
+#endif
+    activationMutex.lock();
+    for (auto& [u, v] : activation) v /= 2;
+    activationMutex.unlock();
+#ifdef DEBUG
+    cout << "Update Activation a period done..." << endl;
+#endif
+    utils::SleepForSeconds(period_sec);
+  }
+}
+
+void collectFriendActivation() {
+  MiraiCP::MiraiCPNewThread(updateActivationPeriodcallyThread, 600).detach();
+  Event::registerEvent<PrivateMessageEvent>([](PrivateMessageEvent e) {
+    QQID uid = e.sender.id();
+    utils::activationAddition(uid, 5);
+  });
+  Event::registerEvent<GroupMessageEvent>([](GroupMessageEvent e) {
+    QQID uid = e.sender.id();
+    utils::activationAddition(uid, 1);
+  });
+  Event::registerEvent<GroupMessageEvent>([](GroupMessageEvent e) {
+    string msg = utils::getAllPlainText(e.getMessageChain());
+    if (msg == "rank") {
+      string ret = "--------------------\n";
+      activationMutex.lock();
+      size_t i, number = activation.size();
+      for (i = 0; i < min((size_t)10, number); i++) {
+        ret += to_string(activation[i].uid) + "\t" +
+               to_string(activation[i].priority) + "\n";
+      }
+      activationMutex.unlock();
+      e.group.sendMessage(ret);
+    }
+  });
 }
 
 // 插件实例
@@ -135,7 +243,9 @@ class PluginMain : public CPPPlugin {
   // 入口函数。插件初始化时会被调用一次，请在此处注册监听
   void onEnable() override {
     // 添加定时更新好友列表的线程
-    MiraiCP::MiraiCPNewThread(updateFriendListPeriodicallyThread, 10).detach();
+    MiraiCP::MiraiCPNewThread(updateFriendListPeriodicallyThread, 60).detach();
+    // 评估/维护好友的活跃度
+    collectFriendActivation();
   }
 
   // 退出函数。请在这里结束掉所有子线程，否则可能会导致程序崩溃
