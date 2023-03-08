@@ -268,13 +268,21 @@ void collectFriendActivation() {
 // 私聊系统
 void privateChatSystem() {
   Event::registerEvent<PrivateMessageEvent>([](PrivateMessageEvent e) {
-    QQID uid = e.sender.id();
-    QQID to_uid = utils::getAChatCP(uid);
-    if (to_uid) {
-      utils::activationAddition(uid, 5);
-      utils::activationAddition(to_uid, -5);
-      Friend _fri = Friend(to_uid, bot_id);
-      _fri.sendMessage(e.message);
+    try {
+      QQID uid = e.sender.id();
+      QQID to_uid = utils::getAChatCP(uid);
+#ifdef DEBUG
+      cout << "Get to_send_uid : " << to_uid << endl;
+#endif
+      if (to_uid) {
+        utils::activationAddition(uid, 5);
+        utils::activationAddition(to_uid, -5);
+        Friend _fri = Friend(to_uid, bot_id);
+        _fri.sendMessage(e.message);
+      }
+    } catch (exception error) {
+      cout << "PrivateChatSystem Error..." << endl;
+      cout << error.what() << endl;
     }
   });
 }
