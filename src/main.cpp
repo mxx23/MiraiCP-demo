@@ -45,10 +45,31 @@ vector<QQID> friendList;  // 机器人的好友列表
 mutex friendListMutex;
 vector<FriendActivation> activation;  // 好友活跃度列表
 mutex activationMutex;
+unordered_map<QQID, QQID> chatCP;  // 好友对话对象
+mutex chatCPMutex;
 
 /*********************************************************/
 
 namespace utils {
+
+QQID getAChatCP(QQID uid) {
+  chatCPMutex.lock();
+  if (chatCP[uid]) {
+    chatCPMutex.unlock();
+    return chatCP[uid];
+  }
+  activationMutex.lock();
+  for (auto& u : activation) {
+    if (!chatCP[u.uid] && u.uid != uid && u.uid != bot_id) {
+      chatCP[uid] = u.uid;
+      chatCP[u.uid] = uid;
+      break;
+    }
+  }
+  activationMutex.unlock();
+  chatCPMutex.unlock();
+  return chatCP[uid];
+}
 
 void activationAddition(QQID uid, int pri) {
   activationMutex.lock();
@@ -63,6 +84,11 @@ void activationAddition(QQID uid, int pri) {
       swap(activation[i], activation[i - 1]);
       i--;
     }
+    while (i + 1 < number &&
+           activation[i].priority < activation[i + 1].priority) {
+      swap(activation[i], activation[i + 1]);
+      i++;
+    }
   }
   activationMutex.unlock();
 }
@@ -70,16 +96,21 @@ void activationAddition(QQID uid, int pri) {
 bool checkIsFriend(QQID uid) {
   friendListMutex.lock();
   for (auto& u : friendList) {
-    if (u == uid) return true;
+    if (u == uid) {
+      friendListMutex.unlock();
+      return true;
+    }
   }
-  return false;
   friendListMutex.unlock();
+  return false;
 }
 
 vector<QQID> getFriendList() {
+  vector<QQID> ret;
   friendListMutex.lock();
-  return friendList;
+  ret = friendList;
   friendListMutex.unlock();
+  return ret;
 }
 
 void updateFriendList(vector<QQID> new_list) {
@@ -207,6 +238,7 @@ void updateActivationPeriodcallyThread(const unsigned int period_sec) {
   }
 }
 
+// 记录好友的活跃度
 void collectFriendActivation() {
   MiraiCP::MiraiCPNewThread(updateActivationPeriodcallyThread, 600).detach();
   Event::registerEvent<PrivateMessageEvent>([](PrivateMessageEvent e) {
@@ -233,6 +265,20 @@ void collectFriendActivation() {
   });
 }
 
+// 私聊系统
+void privateChatSystem() {
+  Event::registerEvent<PrivateMessageEvent>([](PrivateMessageEvent e) {
+    QQID uid = e.sender.id();
+    QQID to_uid = utils::getAChatCP(uid);
+    if (to_uid) {
+      utils::activationAddition(uid, 5);
+      utils::activationAddition(to_uid, -5);
+      Friend _fri = Friend(to_uid, bot_id);
+      _fri.sendMessage(e.message);
+    }
+  });
+}
+
 // 插件实例
 class PluginMain : public CPPPlugin {
  public:
@@ -243,9 +289,11 @@ class PluginMain : public CPPPlugin {
   // 入口函数。插件初始化时会被调用一次，请在此处注册监听
   void onEnable() override {
     // 添加定时更新好友列表的线程
-    MiraiCP::MiraiCPNewThread(updateFriendListPeriodicallyThread, 60).detach();
+    MiraiCP::MiraiCPNewThread(updateFriendListPeriodicallyThread, 120).detach();
     // 评估/维护好友的活跃度
     collectFriendActivation();
+    // 私聊系统
+    privateChatSystem();
   }
 
   // 退出函数。请在这里结束掉所有子线程，否则可能会导致程序崩溃
