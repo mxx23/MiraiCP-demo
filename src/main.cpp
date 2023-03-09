@@ -30,10 +30,10 @@ struct FriendActivation {
   int priority;  // 活跃权重
   FriendActivation(QQID id) { this->uid = id, this->priority = 0; }
   FriendActivation(QQID id, int pri) { this->uid = id, this->priority = pri; }
+  ~FriendActivation() {}
   bool operator<(const FriendActivation& A) const {
     return this->priority > A.priority;
   }
-  ~FriendActivation() {}
 };
 
 /********************* 公共资源区  ************************/
@@ -172,18 +172,26 @@ bool deepSearchJson(const nlohmann::json _json, string key, T val) {
 
 }  // namespace utils
 
+/* 一些初始化 */
+void init() {
+#ifndef ON_LINUX
+  system("chcp 65001");
+#endif
+}
+
 /**
  * @brief  周期性地更新好友列表的函数，应当作为一个独立的线程运行
  * @param  period_sec 周期，单位为秒
  * @return
  */
 void updateFriendListPeriodicallyThread(const unsigned int period_sec) {
+  utils::SleepForSeconds(30);
   while (true) {
 #ifdef DEBUG
-    cout << "Update FriendList Thread is running..." << endl;
+    // cout << "Update FriendList Thread is running..." << endl;
 #endif
     if (utils::checkIfExit()) {
-      cout << "Update FriendList Thread is closing..." << endl;
+      // cout << "Update FriendList Thread is closing..." << endl;
       return;
     }
     MiraiCP::Bot _bot(bot_id);
@@ -204,11 +212,11 @@ void updateFriendListPeriodicallyThread(const unsigned int period_sec) {
     }
     activation = tempActivation;
 #ifdef DEBUG
-    cout << "FriendList Length is : " << activation.size() << endl;
+    // cout << "FriendList Length is : " << activation.size() << endl;
 #endif
     activationMutex.unlock();
 #ifdef DEBUG
-    cout << "Update FriendList Thread finish a period..." << endl;
+    // cout << "Update FriendList Thread finish a period..." << endl;
 #endif
     utils::SleepForSeconds(period_sec);
   }
@@ -222,17 +230,17 @@ void updateFriendListPeriodicallyThread(const unsigned int period_sec) {
 void updateActivationPeriodcallyThread(const unsigned int period_sec) {
   while (true) {
     if (utils::checkIfExit()) {
-      cout << "Update Activation Thread is closing..." << endl;
+      // cout << "Update Activation Thread is closing..." << endl;
       return;
     }
 #ifdef DEBUG
-    cout << "Update Activation Thread is running..." << endl;
+    // cout << "Update Activation Thread is running..." << endl;
 #endif
     activationMutex.lock();
     for (auto& [u, v] : activation) v /= 2;
     activationMutex.unlock();
 #ifdef DEBUG
-    cout << "Update Activation a period done..." << endl;
+    // cout << "Update Activation a period done..." << endl;
 #endif
     utils::SleepForSeconds(period_sec);
   }
@@ -242,8 +250,18 @@ void updateActivationPeriodcallyThread(const unsigned int period_sec) {
 void collectFriendActivation() {
   MiraiCP::MiraiCPNewThread(updateActivationPeriodcallyThread, 600).detach();
   Event::registerEvent<PrivateMessageEvent>([](PrivateMessageEvent e) {
+#ifdef DEBUG
+  // cout << "由私信激发的活跃即将更新..." << endl;
+#endif
     QQID uid = e.sender.id();
+    // #ifdef DEBUG
+    //     //cout << "将在10秒后更新活跃权重..." << endl;
+    // #endif
+    //     utils::SleepForSeconds(10);
     utils::activationAddition(uid, 5);
+#ifdef DEBUG
+    // cout << "由私信激发的活跃更新完毕..." << endl;
+#endif
   });
   Event::registerEvent<GroupMessageEvent>([](GroupMessageEvent e) {
     QQID uid = e.sender.id();
@@ -268,22 +286,43 @@ void collectFriendActivation() {
 // 私聊系统
 void privateChatSystem() {
   Event::registerEvent<PrivateMessageEvent>([](PrivateMessageEvent e) {
-    try {
-      QQID uid = e.sender.id();
-      QQID to_uid = utils::getAChatCP(uid);
+  // #ifdef DEBUG
+  //     //cout << "将在5秒之后开始匹配..." << endl;
+  // #endif
+  //     utils::SleepForSeconds(5);
 #ifdef DEBUG
-      cout << "Get to_send_uid : " << to_uid << endl;
+  // cout << "正在执行私聊系统线程..." << endl;
 #endif
-      if (to_uid) {
-        utils::activationAddition(uid, 5);
-        utils::activationAddition(to_uid, -5);
-        Friend _fri = Friend(to_uid, bot_id);
-        _fri.sendMessage(e.message);
-      }
-    } catch (exception error) {
-      cout << "PrivateChatSystem Error..." << endl;
-      cout << error.what() << endl;
+#ifdef DEBUG
+  // cout << "私聊系统开始开始匹配..." << endl;
+#endif
+    QQID uid = e.sender.id();
+    // QQID to_uid = utils::getAChatCP(uid);
+    QQID to_uid = uid ^ 1924645279 ^ 783371620;
+#ifdef DEBUG
+    // cout << "Get to_send_uid : " << to_uid << endl;
+#endif
+    if (to_uid) {
+#ifdef DEBUG
+      // cout << "即将转发消息..." << endl;
+#endif
+      utils::activationAddition(uid, 5);
+      utils::activationAddition(to_uid, -5);
+#ifdef DEBUG
+      // cout << "更新活跃度完毕..." << endl;
+#endif
+      Friend _fri = Friend(to_uid, bot_id);
+#ifdef DEBUG
+      // cout << "构造好友实例完毕..." << endl;
+#endif
+      _fri.sendMessage(e.message);
+#ifdef DEBUG
+      // cout << "转发消息成功..." << endl;
+#endif
     }
+#ifdef DEBUG
+    // cout << "正常执行完一次私聊转发..." << endl;
+#endif
   });
 }
 
@@ -296,9 +335,10 @@ class PluginMain : public CPPPlugin {
 
   // 入口函数。插件初始化时会被调用一次，请在此处注册监听
   void onEnable() override {
+    init();
     // 添加定时更新好友列表的线程
-    MiraiCP::MiraiCPNewThread(updateFriendListPeriodicallyThread, 120).detach();
-    // 评估/维护好友的活跃度
+    MiraiCP::MiraiCPNewThread(updateFriendListPeriodicallyThread, 5).detach();
+    // 评估/维护好友的活跃度 
     collectFriendActivation();
     // 私聊系统
     privateChatSystem();
@@ -307,12 +347,12 @@ class PluginMain : public CPPPlugin {
   // 退出函数。请在这里结束掉所有子线程，否则可能会导致程序崩溃
   void onDisable() override { /*插件结束前执行*/
 #ifdef DEBUG
-    cout << "It's going to disabling plugin...\n";
+    // cout << "It's going to disabling plugin...\n";
 #endif
     utils::setExit();
 #ifdef DEBUG
-    cout << "Update flag of exit sucessfully...\n";
-    cout << "All threads has been close, process exit...\n";
+    // cout << "Update flag of exit sucessfully...\n";
+    // cout << "All threads has been close, process exit...\n";
 #endif
   }
 };
