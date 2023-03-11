@@ -1,5 +1,5 @@
 #define DEBUG
-// #define ON_LINUX
+#define ON_LINUX
 #ifdef ON_LINUX
 #include <unistd.h>
 #endif  // ON_LINUX
@@ -60,7 +60,7 @@ struct RandChatInfo {
 
 bool ifexit = false;  // 退出标记，true意味着程序即将退出
 mutex exitMtx;
-const QQID bot_id = 1784518480;
+const QQID bot_id = 3278555283;
 vector<QQID> friendList;  // 机器人的好友列表
 vector<QQID> groupList;		//机器人的群列表
 mutex friendListMutex;
@@ -81,7 +81,7 @@ const vector<string> queryWords = { "请问","为什么","有谁知道","吗?", 
 namespace utils {
 
 	optional<RandChatInfo> getChatInfoWithQuote(
-		QQID& quotedGroup, string& quotedId
+		QQID& quotedGroup, string quotedId
 	) {
 		randChatInfoListMutex.lock();
 		for (auto& u : randChatInfoList) {
@@ -755,9 +755,10 @@ public:
 		randChatSystem();
 
 		/******************** 测试区域 *********************/
-		Event::registerEvent<GroupMessageEvent>([](GroupMessageEvent e) {
-
-			});
+		// Event::registerEvent<PrivateMessageEvent>([](PrivateMessageEvent e) {
+		// 	Friend _fri(783371620, bot_id);
+		// 	_fri.sendMessage(e.message);
+		// 	});
 	}
 
 	// 退出函数。请在这里结束掉所有子线程，否则可能会导致程序崩溃
