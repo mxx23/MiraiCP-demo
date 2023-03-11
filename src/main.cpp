@@ -669,7 +669,12 @@ void randChatSystem() {
 #endif
 			//应当转发消息
 			Group group(_info.value().realGroup, bot_id);
-			MessageSource _source = group.quoteAndSendMessage(_info.value().realSource, e.message);
+			nlohmann::json _array = nlohmann::json::array();
+			for(size_t i = 1;i< _json.size(); i++){
+				_array.push_back(_json[i]);
+			}
+			MessageChain _ch = MessageChain::deserializationFromMessageJson(_array);
+			MessageSource _source = group.quoteAndSendMessage(_info.value().realSource, _ch);
 #ifdef DEBUG
 			cout << "转发引用消息完毕..." << endl;
 #endif
